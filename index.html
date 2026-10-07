@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SQL-паттерны: шпаргалка</title>
+<style>
+:root{--bg:#f2f5f8;--card:#fff;--ink:#16202e;--mute:#5a6779;--line:#d8dee6;--acc:#0b63c9;--code:#101a2a;--codeink:#dbe6f5;--tag:#e3eefb}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e141d;--card:#161f2c;--ink:#e6edf6;--mute:#9aa9bc;--line:#26344a;--acc:#5aa5ff;--code:#0a1019;--codeink:#cfe0f7;--tag:#1d3350}}
+:root[data-theme="dark"]{--bg:#0e141d;--card:#161f2c;--ink:#e6edf6;--mute:#9aa9bc;--line:#26344a;--acc:#5aa5ff;--code:#0a1019;--codeink:#cfe0f7;--tag:#1d3350}
+*{box-sizing:border-box}
+html{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+main{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:2rem;line-height:1.15;margin:0 0 6px;letter-spacing:-.02em}
+h2{font-size:1.3rem;margin:42px 0 12px}
+p{margin:0 0 10px;max-width:70ch}
+.sub{color:var(--mute)}
+.bar{display:flex;gap:10px;margin:20px 0 8px;position:sticky;top:env(safe-area-inset-top,0);background:var(--bg);padding:8px 0;z-index:2}
+input{flex:1;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;padding:6px 12px}
+button:hover{border-color:var(--acc)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+details{background:var(--card);border:1px solid var(--line);border-radius:6px;margin:0 0 8px}
+summary{cursor:pointer;padding:12px 14px;font-weight:600;list-style:none;display:flex;gap:10px;align-items:baseline}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";color:var(--acc);font-weight:700;width:1ch}
+details[open] summary::before{content:"\2212"}
+.body{padding:0 14px 14px}
+.trig{background:var(--tag);border-radius:6px;padding:8px 12px;margin:0 0 10px;font-size:.95rem}
+pre{position:relative;background:var(--code);color:var(--codeink);padding:14px;border-radius:6px;overflow-x:auto;margin:0 0 10px;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre button{position:absolute;top:6px;right:6px;font-size:.8rem;padding:2px 8px;background:transparent;color:var(--codeink);border-color:#3a4c68}
+.note{color:var(--mute);font-size:.95rem;margin:0}
+.q li{margin:0 0 6px}
+.empty{color:var(--mute);display:none}
+.ver{font-weight:600;margin:14px 0 6px}
+</style>
+</head>
+<body>
+<main>
+<h1>SQL-паттерны: шпаргалка</h1>
+<p class="sub">Триггер в условии → шаблон → пример. Диалект: PostgreSQL. Сначала найди триггер, потом бери шаблон.</p>
+
+<div class="bar">
+  <input id="q" type="search" placeholder="Поиск по триггеру: например, «подряд» или «накопленная»" aria-label="Поиск">
+  <button id="theme" type="button">Тема</button>
+</div>
+<p class="empty" id="empty">Ничего не найдено. Попробуй другое слово.</p>
+
+<h2>Как думать перед кодом</h2>
+<ol class="q">
+  <li>Что я считаю для <b>одной строки</b>? Выпиши формулу словами.</li>
+  <li>Нужна ли история (окно) или хватит <code>GROUP BY</code>?</li>
+  <li>Есть ли порог, «первый/последний» или «подряд»?</li>
+  <li>Ветки <code>CASE</code> отличаются только порогом одной величины? Скорее всего, это <code>GREATEST</code>/<code>LEAST</code>.</li>
+  <li>Проверь границы: ровно на пороге, ноль, одинаковое время.</li>
+</ol>
+
+<h2>Паттерны</h2>
+<div id="list"></div>
+
+<h2>Разбор: комиссия за снятие свыше лимита</h2>
+<p>Условие: до 150 000 бесплатно, выше берём 3% от суммы превышения, но не меньше 100. Считать комиссию нужно по каждому снятию, потому что минимум 100 действует на каждое платное снятие отдельно.</p>
+<p>Платная часть снятия = длина пересечения отрезка <code>[до, после]</code> с зоной выше лимита. Три случая (не достигнут, пересечён этим снятием, уже превышен) дают одну формулу.</p>
+
+<div id="task"></div>
+<p class="note">Ловушки: <code>0.03</code>, а не <code>0.3</code>; рамка <code>ROWS</code> и тай-брейк в <code>ORDER BY</code> при одинаковом времени; уточнить, лимит за всю историю или помесячный; ровно на лимите комиссии нет (<code>&lt;=</code>).</p>
+
+<h2>Как добавить свой паттерн</h2>
+<p>Открой файл в редакторе, найди в блоке <code>script</code> массив <code>PATTERNS</code>, скопируй любой объект <code>{...},</code>, вставь ниже и поменяй текст. Поиск и кнопка «Копировать» заработают сами.</p>
+</main>
+
+<script>
+/* ===== Чтобы добавить паттерн: скопируй один объект {...}, вставь после него и поменяй текст ===== */
+var PATTERNS = [
+{t:"Нарастающий итог", trig:"накопленная сумма, с начала периода, пока не превысит, running total",
+ code:"SUM(x) OVER (\n  PARTITION BY k\n  ORDER BY t\n  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n)",
+ note:"Без ROWS по умолчанию работает RANGE: строки с одинаковым t получат одну сумму. Добавь второй ключ в ORDER BY (id операции)."},
+{t:"Вклад шага = F(после) − F(до)", trig:"сколько добавил именно это событие к накопленной величине",
+ code:"f(cum) - f(cum - amount)\n\n-- пример: превышение лимита\nGREATEST(cum - 150000, 0) - GREATEST(cum - amount - 150000, 0)",
+ note:"Хранить историю не нужно: она уже внутри cum."},
+{t:"Прогрессивная шкала (налог, тариф, лимит)", trig:"до порога одна ставка, выше другая; бесплатно до N",
+ code:"GREATEST(x - порог, 0)   -- часть выше порога\nLEAST(x, порог)          -- часть до порога",
+ note:"Если ветки CASE отличаются порогом одной переменной, ищи GREATEST/LEAST."},
+{t:"Предыдущая и следующая строка", trig:"по сравнению с прошлым, время между событиями, изменение, рост",
+ code:"LAG(x)  OVER (PARTITION BY k ORDER BY t)\nLEAD(x) OVER (PARTITION BY k ORDER BY t)\n\nx - LAG(x) OVER (...) AS delta",
+ note:"У первой строки LAG вернёт NULL, учитывай это."},
+{t:"Топ-N в группе", trig:"самый/топ-3 в каждой категории",
+ code:"WITH r AS (\n  SELECT *, ROW_NUMBER() OVER (PARTITION BY k ORDER BY x DESC) AS rn\n  FROM t\n)\nSELECT * FROM r WHERE rn <= 3",
+ note:"Нужны ничьи: DENSE_RANK() вместо ROW_NUMBER()."},
+{t:"Дедупликация / последняя запись", trig:"последний статус, актуальная запись, убрать дубли",
+ code:"WITH r AS (\n  SELECT *, ROW_NUMBER() OVER (PARTITION BY key ORDER BY updated_at DESC) AS rn\n  FROM t\n)\nSELECT * FROM r WHERE rn = 1",
+ note:"Тот же приём, что и топ-N, только N = 1."},
+{t:"Условная агрегация", trig:"доля, конверсия, разбить по категориям в колонки",
+ code:"SUM(CASE WHEN cond THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS share\n\n-- в PostgreSQL короче:\nCOUNT(*) FILTER (WHERE cond) * 1.0 / COUNT(*)",
+ note:"Умножай на 1.0, иначе целочисленное деление даст 0."},
+{t:"Кто НЕ сделал", trig:"клиенты без заказов, не вернулись, нет записей",
+ code:"SELECT a.*\nFROM a\nLEFT JOIN b ON a.id = b.id\nWHERE b.id IS NULL",
+ note:"Условие по b в WHERE превращает LEFT JOIN в INNER, поэтому проверяем только IS NULL."},
+{t:"Серии подряд (gaps and islands)", trig:"N дней подряд, самая длинная серия",
+ code:"WITH x AS (\n  SELECT DISTINCT user_id, dt::date AS d FROM t\n), g AS (\n  SELECT *, d - (ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY d))::int AS grp\n  FROM x\n)\nSELECT user_id, grp, COUNT(*) AS streak\nFROM g GROUP BY user_id, grp",
+ note:"У дат одной серии разность d − rn одинакова. Это и есть ключ группы."},
+{t:"Флаг + накопленная сумма флагов", trig:"разбить на сессии, новая группа, если пауза больше X",
+ code:"WITH f AS (\n  SELECT *, CASE WHEN LAG(t) OVER w IS NULL\n                   OR t - LAG(t) OVER w > INTERVAL '30 minutes'\n                 THEN 1 ELSE 0 END AS is_new\n  FROM events WINDOW w AS (PARTITION BY user_id ORDER BY t)\n)\nSELECT *, SUM(is_new) OVER (PARTITION BY user_id ORDER BY t) AS session_id\nFROM f",
+ note:"Два шага: пометить начало группы, затем накопить пометки."},
+{t:"Когорты и retention", trig:"удержание, вернулись через N дней/месяцев, когорта",
+ code:"WITH c AS (\n  SELECT user_id, MIN(dt)::date AS first_dt FROM events GROUP BY user_id\n)\nSELECT date_trunc('month', c.first_dt) AS cohort,\n       (e.dt::date - c.first_dt) / 30 AS age_month,\n       COUNT(DISTINCT e.user_id) AS users\nFROM events e JOIN c USING (user_id)\nGROUP BY 1, 2",
+ note:"Дальше делишь users на размер когорты (age = 0). Это и есть retention."},
+{t:"Скользящее среднее и доля от целого", trig:"за последние 7 дней, скользящее, процент от общего",
+ code:"AVG(x) OVER (ORDER BY t ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)\n\nx * 1.0 / SUM(x) OVER ()                       -- доля от всего\nx * 1.0 / SUM(x) OVER (PARTITION BY k)         -- доля в группе",
+ note:"6 PRECEDING + текущая = 7 строк. Если в днях есть пропуски, сначала собери календарь."}
+];
+
+var TASK = [
+{v:"Вариант 1. Разность превышений (компактный)",
+ code:"WITH cum AS (\n  SELECT cid, amount,\n    SUM(amount) OVER (PARTITION BY cid ORDER BY dt, amount\n      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_amount\n  FROM withdraw\n), p AS (\n  SELECT cid,\n    GREATEST(cum_amount - 150000, 0)\n    - GREATEST(cum_amount - amount - 150000, 0) AS paid\n  FROM cum\n)\nSELECT cid,\n  SUM(CASE WHEN paid > 0 THEN GREATEST(paid * 0.03, 100) ELSE 0 END) AS total_commission\nFROM p GROUP BY cid ORDER BY cid;",
+ note:"Результат: клиент 1 → 0, клиент 2 → 990, клиент 3 → 0."},
+{v:"Вариант 2. Три ветки CASE (прямая логика)",
+ code:"CASE\n  WHEN cum_amount <= 150000 THEN 0\n  WHEN cum_amount - amount >= 150000 THEN GREATEST(amount * 0.03, 100)\n  ELSE GREATEST((cum_amount - 150000) * 0.03, 100)\nEND",
+ note:"Порядок веток важен: сначала отсеиваем бесплатные снятия."},
+{v:"Вариант 3. Подзапрос вместо окна",
+ code:"SELECT w.cid, w.dt, w.amount,\n  COALESCE((SELECT SUM(p.amount) FROM withdraw p\n            WHERE p.cid = w.cid AND p.dt < w.dt), 0) AS before_amount\nFROM withdraw w",
+ note:"Медленнее; при одинаковом dt нужен уникальный id операции."},
+{v:"Вариант 4. Pandas",
+ code:"df = df.sort_values(['cid', 'dt'])\ndf['cum'] = df.groupby('cid')['amount'].cumsum()\ndf['paid'] = (df['cum'] - 150000).clip(lower=0) - (df['cum'] - df['amount'] - 150000).clip(lower=0)\ndf['fee'] = np.where(df['paid'] > 0, np.maximum(df['paid'] * 0.03, 100), 0)\ndf.groupby('cid')['fee'].sum()",
+ note:"clip(lower=0) здесь работает как GREATEST(..., 0)."}
+];
+
+function el(tag, cls, text){var e=document.createElement(tag); if(cls) e.className=cls; if(text!==undefined) e.textContent=text; return e;}
+function codeBox(src){
+  var pre=el("pre"), c=el("code",null,src), b=el("button",null,"Копировать");
+  b.type="button";
+  b.onclick=function(){
+    var done=function(){b.textContent="Скопировано"; setTimeout(function(){b.textContent="Копировать"},1500)};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(src).then(done,function(){})}
+    else{var r=document.createRange(); r.selectNodeContents(c); var s=getSelection(); s.removeAllRanges(); s.addRange(r); try{document.execCommand("copy"); done()}catch(e){}}
+  };
+  pre.appendChild(b); pre.appendChild(c); return pre;
+}
+var list=document.getElementById("list"), cards=[];
+PATTERNS.forEach(function(p){
+  var d=el("details"), s=el("summary",null,p.t), body=el("div","body");
+  var tr=el("p","trig"); var tb=el("b",null,"Триггер: "); tr.appendChild(tb); tr.appendChild(document.createTextNode(p.trig));
+  body.appendChild(tr); body.appendChild(codeBox(p.code)); body.appendChild(el("p","note",p.note));
+  d.appendChild(s); d.appendChild(body); list.appendChild(d);
+  cards.push({d:d, text:(p.t+" "+p.trig+" "+p.note).toLowerCase()});
+});
+var task=document.getElementById("task");
+TASK.forEach(function(t,i){
+  var d=el("details"), s=el("summary",null,t.v), body=el("div","body");
+  body.appendChild(codeBox(t.code)); body.appendChild(el("p","note",t.note));
+  d.appendChild(s); d.appendChild(body); if(i===0) d.open=true; task.appendChild(d);
+});
+document.getElementById("q").addEventListener("input",function(e){
+  var v=e.target.value.trim().toLowerCase(), n=0;
+  cards.forEach(function(c){var ok=!v||c.text.indexOf(v)>-1; c.d.style.display=ok?"":"none"; if(ok) n++; if(v&&ok) c.d.open=true;});
+  document.getElementById("empty").style.display=n?"none":"block";
+});
+document.getElementById("theme").onclick=function(){
+  var r=document.documentElement, dark=matchMedia("(prefers-color-scheme: dark)").matches;
+  var cur=r.getAttribute("data-theme")||(dark?"dark":"light");
+  r.setAttribute("data-theme",cur==="dark"?"light":"dark");
+};
+</script>
+</body>
+</html>
